@@ -18,17 +18,23 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Les runners GitHub ont déjà le SDK Android préinstallé
-      # (/usr/local/lib/android/sdk) avec les licences acceptées :
-      # pas besoin d'action de setup SDK.
-
       - name: Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+          cache-read-only: false
 
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          # Retry x3 : les échecs réseau vers dl.google.com sont
+          # occasionnels sur les runners GitHub hébergés.
+          ok=0
+          for i in 1 2 3; do
+            gradle assembleDebug --no-daemon --stacktrace && ok=1 && break
+            echo "Tentative $i échouée, nouvelle tentative..."
+            sleep 10
+          done
+          [ $ok -eq 1 ]
 
       - name: Upload APK
         if: always()
