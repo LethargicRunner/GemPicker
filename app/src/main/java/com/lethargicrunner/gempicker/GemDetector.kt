@@ -79,9 +79,11 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             val circularity = 4 * Math.PI * area / (perim * perim)
             // Anneau fin : l'aire du contour est faible → filtre par RAYON
             // du cercle englobant, pas par aire de contour.
-            val enc = FloatArray(3)
-            Imgproc.minEnclosingCircle(MatOfPoint2f(*c.toArray()), enc)
-            if (enc[2] > circleMinRadius && circularity > 0.6) {
+            // Signature : minEnclosingCurve(points, center: Point, radius: float[])
+            val encCenter = Point()
+            val encRadius = floatArrayOf(0f)
+            Imgproc.minEnclosingCircle(MatOfPoint2f(*c.toArray()), encCenter, encRadius)
+            if (encRadius[0] > circleMinRadius && circularity > 0.6) {
                 val m = Imgproc.moments(c)
                 if (m.m00 == 0.0) continue
                 val cx = m.m10 / m.m00
