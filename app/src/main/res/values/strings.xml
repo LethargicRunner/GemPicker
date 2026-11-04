@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">GemPicker</string>
-    <string name="accessibility_desc">Permet à GemPicker de simuler un appui sur la gemme détectée à l'écran.</string>
+    <string name="accessibility_desc">Permet à GemPicker de simuler un appui sur la gemme détectée à l\'écran.</string>
     <string name="show_bubble">Afficher la bulle</string>
 </resources>
