@@ -70,7 +70,6 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
 
         val greenContours = ArrayList<MatOfPoint>()
         Imgproc.findContours(greenMask, greenContours, Mat(), Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
-        greenMask.release()
 
         var circle: Circle? = null
         for (c in greenContours) {
@@ -95,19 +94,18 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
                 if (circle == null || area > circle.area) circle = Circle(cx, cy, radius, area)
             }
         }
-        mat.release()
-        if (circle == null) return null   // pas de cercle → aucun tap (sécurité)
+        if (circle == null) { greenMask.release(); mat.release(); return null }
 
         // ── 2. Masque BLEU → gemme ──
-        val mat2 = Mat()
-        Utils.bitmapToMat(roi, mat2)
-        Imgproc.cvtColor(mat2, mat2, Imgproc.COLOR_RGBA2BGR)
-        Imgproc.cvtColor(mat2, mat2, Imgproc.COLOR_BGR2HSV)
         val blueMask = Mat()
-        Core.inRange(mat2, blueLow, blueHigh, blueMask)
-        mat2.release()
+        Core.inRange(mat, blueLow, blueHigh, blueMask)
+        mat.release()
         Imgproc.erode(blueMask, blueMask, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0)))
         Imgproc.dilate(blueMask, blueMask, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0)))
+
+        // ── DEBUG : aperçu des masques (B = gemme, G = cercle) ──
+        if (ScreenCaptureService.debugEnabled) buildDebugBitmap(blueMask, greenMask, roi)
+        greenMask.release()
 
         val contours = ArrayList<MatOfPoint>()
         Imgproc.findContours(blueMask, contours, Mat(), Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
@@ -152,6 +150,20 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         if (SystemClock.uptimeMillis() - lastTapAt < cooldownMs) return null
         lastTapAt = SystemClock.uptimeMillis()
         return best
+    }
+
+    /** Masque composite BGRA : canal B = gemme, canal G = cercle, affiché par DebugOverlay */
+    private fun buildDebugBitmap(blueMask: Mat, greenMask: Mat, roi: Bitmap) {
+        try {
+            val zeros = Mat.zeros(blueMask.size(), CvType.CV_8U)
+            val alpha = Mat(blueMask.size(), CvType.CV_8U, Scalar.all(255.0))
+            val bgra = Mat()
+            Core.merge(ArrayList(listOf(blueMask, greenMask, zeros, alpha)), bgra)
+            val bmp = Bitmap.createBitmap(roi.width, roi.height, Bitmap.Config.ARGB_8888)
+            Utils.matToBitmap(bgra, bmp)
+            bgra.release(); zeros.release(); alpha.release()
+            ScreenCaptureService.debugBitmap = bmp
+        } catch (_: Exception) { }
     }
 
     private fun Image.toBitmapCompat(): Bitmap? = try {

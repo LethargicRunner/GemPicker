@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Cercle d'action (référence au jeu) -->
+    <path
+        android:pathData="M24,54 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0"
+        android:strokeColor="#5CE27A"
+        android:strokeWidth="4"/>
+
+    <!-- Gemme : contour -->
+    <path
+        android:pathData="M54,34 L69,48 L54,76 L39,48 Z"
+        android:fillColor="#35D0FF"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.5"/>
+
+    <!-- Facette gauche (ombre) -->
+    <path
+        android:pathData="M54,34 L54,76 L39,48 Z"
+        android:fillColor="#1BA8E8"/>
+
+    <!-- Facette centrale -->
+    <path
+        android:pathData="M54,34 L49,48 L54,76 L59,48 Z"
+        android:fillColor="#7FE0FF"/>
+
+    <!-- Table (haut brillant) -->
+    <path
+        android:pathData="M50.5,38.5 L57.5,38.5 L61,48 L47,48 Z"
+        android:fillColor="#B8F0FF"/>
+
+    <!-- Étincelle -->
+    <path
+        android:pathData="M65,36 L66.5,39.5 L70,41 L66.5,42.5 L65,46 L63.5,42.5 L60,41 L63.5,39.5 Z"
+        android:fillColor="#FFFFFF"/>
+</vector>

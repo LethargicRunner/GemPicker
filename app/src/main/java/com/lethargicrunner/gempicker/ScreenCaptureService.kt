@@ -1,12 +1,11 @@
 package com.lethargicrunner.gempicker
 
 import android.app.*
-import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
-import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -19,10 +18,15 @@ class ScreenCaptureService : Service() {
         const val TAG = "GemPicker"
         const val ACTION_STOP = "com.lethargicrunner.gempicker.STOP"
         const val ANALYSIS_INTERVAL_MS = 100L   // ~10 fps
+        const val NOTIFICATION_ID = 1
 
         data class Detection(val x: Float, val y: Float, val confidence: Double, val ts: Long)
         @Volatile var lastDetection: Detection? = null
         @Volatile var running = false
+
+        // Mode debug : aperçu des masques (appui long sur la bulle)
+        @Volatile var debugEnabled = false
+        @Volatile var debugBitmap: Bitmap? = null
     }
 
     private var projection: MediaProjection? = null
@@ -101,9 +105,5 @@ class ScreenCaptureService : Service() {
         imageReader?.close()
         handlerThread?.quitSafely()
         super.onDestroy()
-    }
-
-    companion object {
-        const val NOTIFICATION_ID = 1
     }
 }

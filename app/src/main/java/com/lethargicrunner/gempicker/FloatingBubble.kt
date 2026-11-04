@@ -9,16 +9,19 @@ import android.graphics.drawable.GradientDrawable
 import android.provider.Settings
 import android.view.*
 import android.widget.ImageView
+import android.widget.Toast
 import kotlin.math.abs
 
 /**
  * Bulle flottante draggable (56dp), toujours au-dessus du jeu.
- * Tap = ON/OFF. Glisser = déplacer. Anneau vert = actif.
+ * Tap = ON/OFF. Appui LONG = mode debug (aperçu des masques de détection).
+ * Glisser = déplacer. Anneau vert = actif.
  */
 class FloatingBubble(private val context: Context) {
 
     private val windowManager = context.getSystemService(WindowManager::class.java)
     private var bubble: View? = null
+    private var debugOverlay: DebugOverlay? = null
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildBubble(): View {
@@ -72,9 +75,25 @@ class FloatingBubble(private val context: Context) {
                 setOn(view, false)
             } else if (MediaProjectionHolder.hasSession()) {
                 ScreenCaptureService.running = true
-                ContextCompat.startForegroundServiceCompat(context)
+                context.startForegroundService(Intent(context, ScreenCaptureService::class.java))
                 setOn(view, true)
             }
+        }
+
+        // Appui long = bascule du mode debug (calibration des bornes HSV)
+        view.isLongClickable = true
+        view.setOnLongClickListener {
+            if (moved) return@setOnLongClickListener true
+            ScreenCaptureService.debugEnabled = !ScreenCaptureService.debugEnabled
+            if (debugOverlay == null) debugOverlay = DebugOverlay(context)
+            if (ScreenCaptureService.debugEnabled) {
+                debugOverlay?.show()
+                Toast.makeText(context, "Debug ON : bleu = gemme, vert = cercle", Toast.LENGTH_SHORT).show()
+            } else {
+                debugOverlay?.hide()
+                Toast.makeText(context, "Debug OFF", Toast.LENGTH_SHORT).show()
+            }
+            true
         }
 
         windowManager.addView(view, params)
@@ -87,10 +106,6 @@ class FloatingBubble(private val context: Context) {
             setColor(if (on) 0xCC00C853.toInt() else 0x99000000.toInt())
             if (on) setStroke(4, Color.WHITE)
         }
-    }
-
-    private fun ContextCompat.startForegroundServiceCompat(ctx: Context) {
-        ctx.startForegroundService(Intent(ctx, ScreenCaptureService::class.java))
     }
 
     fun show() { if (bubble == null && Settings.canDrawOverlays(context)) bubble = buildBubble() }
