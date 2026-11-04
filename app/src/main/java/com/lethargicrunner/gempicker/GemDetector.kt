@@ -6,13 +6,17 @@ import android.os.SystemClock
 import org.opencv.android.Utils
 import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
-import kotlin.math.abs
 import kotlin.math.hypot
 
 /**
  * Détection : gemme bleue (losange) + cercle d'action vert.
  * Tap UNIQUEMENT si la gemme entière est franchement dans le cercle
  * (marge 20 %) — pour ne jamais déclencher la popup d'erreur du jeu.
+ *
+ * Calibration (4 nov. 2026, d'après 3 captures réelles du téléphone) :
+ * - gemme : bleu clair cyan, losange ~1/20 de la largeur d'écran, liseré blanc fin
+ * - cercle : anneau vert clair NON rempli, fin (2-3 px), diamètre ~1/3 de la largeur
+ * - tous les seuils sont RELATIFS à la largeur d'écran (indépendant de la résolution)
  */
 class GemDetector(private val screenW: Int, private val screenH: Int) {
 
@@ -28,11 +32,18 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
     private val ABSOLUTE_NO_TAP_BOTTOM_FRACTION = 0.88f
     private val ABSOLUTE_NO_TAP_TOP_FRACTION    = 0.12f
 
-    // À calibrer avec le guide (captures calib-*.jpg)
-    private val blueLow  = Scalar(100.0, 80.0, 60.0)
-    private val blueHigh = Scalar(125.0, 255.0, 255.0)
-    private val greenLow  = Scalar(45.0, 90.0, 60.0)
-    private val greenHigh = Scalar(75.0, 255.0, 255.0)
+    // Teinte cyan de la gemme (OpenCV H ∈ [0,180] : 85-115 ≈ 170-230°)
+    private val blueLow  = Scalar(85.0, 90.0, 100.0)
+    private val blueHigh = Scalar(115.0, 255.0, 255.0)
+    // Vert clair de l'anneau d'action
+    private val greenLow  = Scalar(40.0, 60.0, 80.0)
+    private val greenHigh = Scalar(85.0, 255.0, 255.0)
+
+    // Seuils relatifs à la largeur d'écran (captures : gemme ≈ 1/20 largeur,
+    // cercle ≈ 1/3 largeur de diamètre, anneau fin)
+    private val minGemArea = 0.5 * (0.04 * screenW) * (0.04 * screenW)   // losange ≈ d²/2
+    private val maxGemArea = 0.5 * (0.10 * screenW) * (0.10 * screenW)
+    private val circleMinRadius = 0.12 * screenW
 
     private val inclusionMargin = 0.80f
     private var lastTapAt = 0L
@@ -53,8 +64,9 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         // ── 1. Masque VERT → cercle d'action ──
         val greenMask = Mat()
         Core.inRange(mat, greenLow, greenHigh, greenMask)
+        // Anneau fin (2-3 px) : dilatation plus large pour le refermer
         Imgproc.dilate(greenMask, greenMask,
-            Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(9.0, 9.0)))
+            Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(13.0, 13.0)))
 
         val greenContours = ArrayList<MatOfPoint>()
         Imgproc.findContours(greenMask, greenContours, Mat(), Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
@@ -66,7 +78,11 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             val perim = Imgproc.arcLength(MatOfPoint2f(*c.toArray()), true)
             if (perim <= 0.0) continue
             val circularity = 4 * Math.PI * area / (perim * perim)
-            if (area > CIRCLE_MIN_AREA && circularity > 0.6) {
+            // Anneau fin : l'aire du contour est faible → filtre par RAYON
+            // du cercle englobant, pas par aire de contour.
+            val enc = FloatArray(3)
+            Imgproc.minEnclosingCircle(MatOfPoint2f(*c.toArray()), enc)
+            if (enc[2] > circleMinRadius && circularity > 0.6) {
                 val m = Imgproc.moments(c)
                 if (m.m00 == 0.0) continue
                 val cx = m.m10 / m.m00
@@ -83,13 +99,11 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         if (circle == null) return null   // pas de cercle → aucun tap (sécurité)
 
         // ── 2. Masque BLEU → gemme ──
-        val blueMask = Mat()
-        // réutilise l'image HSV déjà libérée : recalcule sur la ROI
-        // (simplification : relance une conversion légère)
         val mat2 = Mat()
         Utils.bitmapToMat(roi, mat2)
         Imgproc.cvtColor(mat2, mat2, Imgproc.COLOR_RGBA2BGR)
         Imgproc.cvtColor(mat2, mat2, Imgproc.COLOR_BGR2HSV)
+        val blueMask = Mat()
         Core.inRange(mat2, blueLow, blueHigh, blueMask)
         mat2.release()
         Imgproc.erode(blueMask, blueMask, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0)))
@@ -103,7 +117,7 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         var bestScore = Double.NEGATIVE_INFINITY
         for (c in contours) {
             val area = Imgproc.contourArea(c)
-            if (area < MIN_GEM_AREA || area > MAX_GEM_AREA) continue
+            if (area < minGemArea || area > maxGemArea) continue
 
             val moments = Imgproc.moments(c)
             if (moments.m00 == 0.0) continue
@@ -129,7 +143,7 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
                 bestScore = score
                 best = ScreenCaptureService.Detection(
                     cx + roiLeft, cy + roiTop,
-                    area / MAX_GEM_AREA, System.currentTimeMillis()
+                    area / maxGemArea, System.currentTimeMillis()
                 )
             }
         }
@@ -152,11 +166,4 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         bmp.copyPixelsFromBuffer(buffer)
         Bitmap.createBitmap(bmp, 0, 0, width, height)
     } catch (e: Exception) { null }
-
-    companion object {
-        // À calibrer : voir le guide de calibration (captures calib-*.jpg)
-        var MIN_GEM_AREA = 200.0
-        var MAX_GEM_AREA = 6000.0
-        var CIRCLE_MIN_AREA = 8000.0
-    }
 }
