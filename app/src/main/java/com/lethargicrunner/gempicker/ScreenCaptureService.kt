@@ -2,6 +2,7 @@ package com.lethargicrunner.gempicker
 
 import android.app.*
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
@@ -11,6 +12,7 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.*
 import android.util.Log
+import androidx.core.app.ServiceCompat
 
 class ScreenCaptureService : Service() {
 
@@ -39,7 +41,18 @@ class ScreenCaptureService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) { stopSelf(); return START_NOT_STICKY }
-        startForeground(NOTIFICATION_ID, buildNotification())
+
+        val notification = buildNotification()
+        // Android 14+ (API 34) : startForeground DOIT préciser le type,
+        // sinon crash MissingForegroundServiceTypeException.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ServiceCompat.startForeground(
+                this, NOTIFICATION_ID, notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
 
         val mgr = getSystemService(MediaProjectionManager::class.java)
         val data = MediaProjectionHolder.data
@@ -100,6 +113,8 @@ class ScreenCaptureService : Service() {
 
     override fun onDestroy() {
         running = false
+        debugBitmap?.recycle()
+        debugBitmap = null
         virtualDisplay?.release()
         projection?.stop()
         imageReader?.close()

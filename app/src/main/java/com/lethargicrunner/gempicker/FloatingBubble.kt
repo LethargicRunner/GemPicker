@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.*
 import android.widget.ImageView
@@ -14,8 +15,12 @@ import kotlin.math.abs
 
 /**
  * Bulle flottante draggable (56dp), toujours au-dessus du jeu.
- * Tap = ON/OFF. Appui LONG = mode debug (aperçu des masques de détection).
+ * Tap court = ON/OFF. Appui LONG (> 500 ms) = mode debug.
  * Glisser = déplacer. Anneau vert = actif.
+ *
+ * NB : le OnTouchListener consomme tous les événements → le système ne
+ * peut PAS détecter le long-press tout seul ; on chronomètre DOWN/UP
+ * manuellement.
  */
 class FloatingBubble(private val context: Context) {
 
@@ -46,12 +51,14 @@ class FloatingBubble(private val context: Context) {
         }
 
         var downX = 0; var downY = 0; var startX = 0; var startY = 0
+        var downTime = 0L
         var moved = false
         view.setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = ev.rawX.toInt(); downY = ev.rawY.toInt()
                     startX = params.x; startY = params.y; moved = false
+                    downTime = SystemClock.uptimeMillis()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -62,42 +69,47 @@ class FloatingBubble(private val context: Context) {
                     windowManager.updateViewLayout(v, params)
                     true
                 }
-                MotionEvent.ACTION_UP -> { v.performClick() }
+                MotionEvent.ACTION_UP -> {
+                    val pressDuration = SystemClock.uptimeMillis() - downTime
+                    if (!moved) {
+                        if (pressDuration >= 500L) toggleDebug()
+                        else handleOnOff()
+                    }
+                    true
+                }
                 else -> false
             }
         }
 
-        view.setOnClickListener {
-            if (moved) return@setOnClickListener
-            if (ScreenCaptureService.running) {
-                ScreenCaptureService.running = false
-                context.stopService(Intent(context, ScreenCaptureService::class.java))
-                setOn(view, false)
-            } else if (MediaProjectionHolder.hasSession()) {
-                ScreenCaptureService.running = true
-                context.startForegroundService(Intent(context, ScreenCaptureService::class.java))
-                setOn(view, true)
-            }
-        }
-
-        // Appui long = bascule du mode debug (calibration des bornes HSV)
-        view.isLongClickable = true
-        view.setOnLongClickListener {
-            if (moved) return@setOnLongClickListener true
-            ScreenCaptureService.debugEnabled = !ScreenCaptureService.debugEnabled
-            if (debugOverlay == null) debugOverlay = DebugOverlay(context)
-            if (ScreenCaptureService.debugEnabled) {
-                debugOverlay?.show()
-                Toast.makeText(context, "Debug ON : bleu = gemme, vert = cercle", Toast.LENGTH_SHORT).show()
-            } else {
-                debugOverlay?.hide()
-                Toast.makeText(context, "Debug OFF", Toast.LENGTH_SHORT).show()
-            }
-            true
-        }
-
         windowManager.addView(view, params)
         return view
+    }
+
+    private fun handleOnOff() {
+        val v = bubble ?: return
+        if (ScreenCaptureService.running) {
+            ScreenCaptureService.running = false
+            context.stopService(Intent(context, ScreenCaptureService::class.java))
+            setOn(v, false)
+        } else if (MediaProjectionHolder.hasSession()) {
+            ScreenCaptureService.running = true
+            context.startForegroundService(Intent(context, ScreenCaptureService::class.java))
+            setOn(v, true)
+        }
+    }
+
+    private fun toggleDebug() {
+        val v = bubble ?: return
+        ScreenCaptureService.debugEnabled = !ScreenCaptureService.debugEnabled
+        if (debugOverlay == null) debugOverlay = DebugOverlay(context)
+        if (ScreenCaptureService.debugEnabled) {
+            debugOverlay?.show()
+            setOn(v, ScreenCaptureService.running)
+            Toast.makeText(context, "Debug ON : bleu = gemme, vert = cercle", Toast.LENGTH_SHORT).show()
+        } else {
+            debugOverlay?.hide()
+            Toast.makeText(context, "Debug OFF", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun setOn(view: View, on: Boolean) {
