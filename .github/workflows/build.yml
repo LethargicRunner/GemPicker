@@ -18,13 +18,9 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: SDK Android
-        uses: android-actions/setup-android@v3
-
-      - name: Accepter licences + installer SDK 35
-        run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" > /dev/null
+      # Les runners GitHub ont déjà le SDK Android préinstallé
+      # (/usr/local/lib/android/sdk) avec les licences acceptées :
+      # pas besoin d'action de setup SDK.
 
       - name: Gradle
         uses: gradle/actions/setup-gradle@v4
