@@ -78,28 +78,32 @@ class FloatingBubble(private val context: Context) {
         }
 
         windowManager.addView(view, params)
+        GemLog.i("Bubble", "Bulle affichée")
         return view
     }
 
     private fun handleOnOff() {
         val v = bubble ?: return
         if (ScreenCaptureService.running) {
+            GemLog.i("Bubble", "Tap : ARRÊT de la capture")
             ScreenCaptureService.running = false
             context.stopService(Intent(context, ScreenCaptureService::class.java))
             setOn(v, false)
         } else {
             if (!MediaProjectionHolder.hasSession()) {
-                // Aucune session : la popup de consentement n'a jamais été validée.
+                GemLog.w("Bubble", "Tap sans session de capture (popup non validée)")
                 Toast.makeText(context,
                     "Pas de session de capture : relancez l'app GemPicker et validez la popup",
                     Toast.LENGTH_LONG).show()
                 return
             }
             try {
+                GemLog.i("Bubble", "Tap : DÉMARRAGE de la capture")
                 ScreenCaptureService.running = true
                 context.startForegroundService(Intent(context, ScreenCaptureService::class.java))
                 setOn(v, true)
             } catch (e: Exception) {
+                GemLog.e("Bubble", "Démarrage du service impossible", e)
                 ScreenCaptureService.running = false
                 setOn(v, false)
                 Toast.makeText(context,
@@ -112,6 +116,7 @@ class FloatingBubble(private val context: Context) {
     private fun toggleDebug() {
         val v = bubble ?: return
         ScreenCaptureService.debugEnabled = !ScreenCaptureService.debugEnabled
+        GemLog.i("Bubble", "Appui long : debug = ${ScreenCaptureService.debugEnabled}")
         if (debugOverlay == null) debugOverlay = DebugOverlay(context)
         if (ScreenCaptureService.debugEnabled) {
             debugOverlay?.show()
