@@ -7,6 +7,7 @@ import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
+import kotlin.math.abs
 import kotlin.math.hypot
 
 /**
@@ -19,11 +20,13 @@ import kotlin.math.hypot
  *    tap direct où qu'ils apparaissent dans la zone de jeu
  *    (hors HUD haut et barre du bas, barrières absolues).
  *
+ * ANTI-BLOCAGE : une position tapée 3 fois sans effet (élément inerte du
+ * décor) est ignorée 10 s pour libérer les vraies cibles.
+ *
  * CALIBRATION (5 nov. 2026, capture réelle du minijeu) :
  * - poisson rose #FF00AA -> H OpenCV ~160, fourchette 150-175
  * - poissons jaunes/orange -> H OpenCV 20-40
  * - losange bleu-cyan #00F0FF en haut à droite = HUD, ne JAMAIS le taper
- *   (couvert par la barrière absolue des 12 % supérieurs)
  */
 class GemDetector(private val screenW: Int, private val screenH: Int) {
 
@@ -50,28 +53,53 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
     private val blueHigh = Scalar(115.0, 255.0, 255.0)
     private val greenLow  = Scalar(40.0, 60.0, 80.0)
     private val greenHigh = Scalar(85.0, 255.0, 255.0)
-    // Poissons jaunes/or : H 20-40, bien saturés
     private val yellowLow  = Scalar(20.0, 100.0, 120.0)
     private val yellowHigh = Scalar(40.0, 255.0, 255.0)
-    // Poisson rose #FF00AA : H ~160
     private val pinkLow  = Scalar(150.0, 100.0, 120.0)
     private val pinkHigh = Scalar(175.0, 255.0, 255.0)
 
     // Tailles attendues (relatives à la largeur analysée)
     private val minGemArea = 0.5 * (0.04 * aw) * (0.04 * aw)
     private val maxGemArea = 0.5 * (0.10 * aw) * (0.10 * aw)
-    // Poissons ~10 % de largeur -> fourchette large
     private val minShapeArea = 0.5 * (0.03 * aw) * (0.03 * aw)
     private val maxShapeArea = 0.5 * (0.18 * aw) * (0.18 * aw)
 
     private val circleMinRadius = 0.12 * aw
     private val inclusionMargin = 0.80f
     private var lastTapAt = 0L
-    // Minijeu poissons : clic le plus rapide possible
     private val cooldownMs = 250L
     private var frameCount = 0
 
     data class Circle(val cx: Double, val cy: Double, val radius: Double, val area: Double)
+
+    // ── ANTI-BLOCAGE ──
+    private class Stuck(val x: Float, val y: Float) {
+        var count = 0
+        var blackUntil = 0L
+        var lastTapAt = 0L
+    }
+    private val stuckList = ArrayList<Stuck>()
+
+    private fun isBlacklisted(x: Float, y: Float): Boolean {
+        val now = SystemClock.uptimeMillis()
+        stuckList.removeAll { it.blackUntil < now && now - it.lastTapAt > 30_000 }
+        return stuckList.any { s ->
+            s.blackUntil > now && abs(x - s.x) < 20f && abs(y - s.y) < 20f
+        }
+    }
+
+    private fun recordTap(x: Float, y: Float) {
+        val now = SystemClock.uptimeMillis()
+        val s = stuckList.firstOrNull { abs(x - it.x) < 20f && abs(y - it.y) < 20f }
+            ?: Stuck(x, y).also { stuckList.add(it) }
+        s.count++
+        s.lastTapAt = now
+        if (s.count >= 3) {
+            s.blackUntil = now + 10_000
+            s.count = 0
+            GemLog.i("AntiBlocage", "Position (${x.toInt()}, ${y.toInt()}) ignorée 10 s (élément inerte tapé 3 fois)")
+        }
+    }
 
     /** Candidat de tap trouvé, avant le cooldown. */
     data class Hit(val x: Float, val y: Float, val area: Double, val score: Double)
@@ -150,7 +178,6 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
                 val area = Imgproc.contourArea(c)
                 if (area > bestHitArea) bestHitArea = area
                 if (area < minArea || area > maxArea) continue
-                // La gemme exige un cercle ; poissons : tap direct
                 if (requiresCircle && circle == null) continue
 
                 val moments = Imgproc.moments(c)
@@ -158,13 +185,11 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
                 val cx = (moments.m10 / moments.m00).toFloat()
                 val cy = (moments.m01 / moments.m00).toFloat()
 
-                // Barrières absolues : jamais dans le HUD ni la barre du bas
                 val absY = cy / ah
                 if (absY < ABSOLUTE_NO_TAP_TOP_FRACTION ||
                     absY > ABSOLUTE_NO_TAP_BOTTOM_FRACTION) continue
 
                 val circ = circle
-                // Inclusion stricte dans le cercle (gemme uniquement)
                 if (requiresCircle) {
                     if (circ == null) continue
                     var maxDist = 0.0
@@ -179,13 +204,10 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
                     hypot((cx - circ.cx), (cy - circ.cy)) else 0.0
                 val score = area * 1000 - dist
                 if (bestHit == null || score > bestHit!!.score) {
-                    val roiLeftScreen = (screenW * 0.10f)
-                    val roiTopScreen = (screenH * 0.15f)
-                    bestHit = Hit(
-                        (cx / ANALYSIS_SCALE) + roiLeftScreen,
-                        (cy / ANALYSIS_SCALE) + roiTopScreen,
-                        area, score
-                    )
+                    val hx = (cx / ANALYSIS_SCALE) + (screenW * 0.10f)
+                    val hy = (cy / ANALYSIS_SCALE) + (screenH * 0.15f)
+                    if (isBlacklisted(hx, hy)) continue
+                    bestHit = Hit(hx, hy, area, score)
                 }
             }
         }
@@ -203,11 +225,11 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         val hit = bestHit ?: return null
         if (SystemClock.uptimeMillis() - lastTapAt < cooldownMs) return null
         lastTapAt = SystemClock.uptimeMillis()
+        recordTap(hit.x, hit.y)
         GemLog.i("GemDetector", "TAP déclenché en (${hit.x.toInt()}, ${hit.y.toInt()}) aire=${"%.0f".format(hit.area)}")
         return ScreenCaptureService.Detection(hit.x, hit.y, hit.area / maxShapeArea, System.currentTimeMillis())
     }
 
-    // Garde le masque vert pour l'aperçu debug composite
     private var debugGreenMask: Mat? = null
     private fun keepDebugGreen(m: Mat) {
         debugGreenMask?.release()
@@ -215,10 +237,6 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         m.release()
     }
 
-    /**
-     * Toutes les ~10 s : observations chiffrées + histogramme des teintes
-     * saturées (S>80, V>80) — révèle les teintes HSV réelles du jeu.
-     */
     private var lastDiagAt = 0L
     private fun maybeLogDiagnostics(greenCount: Int, targetCount: Int,
                                     bestArea: Double, circle: Circle?, roi: Bitmap) {
@@ -246,7 +264,6 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             Core.inRange(v, Scalar(80.0), Scalar(255.0), vMask)
             Core.bitwise_and(sMask, vMask, satMask)
             val hist = Mat()
-            // Signature : calcHist(images, channels, mask, hist, histSize, ranges)
             Imgproc.calcHist(listOf(h), MatOfInt(0), satMask, hist, MatOfInt(180), MatOfFloat(0f, 180f))
             var total = 0.0
             val bins = ArrayList<Pair<Int, Double>>()
@@ -268,7 +285,6 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         }
     }
 
-    /** Masque composite BGRA : canal B = cibles, canal G = cercle. */
     private fun buildDebugBitmap(targetMask: Mat) {
         try {
             val green = debugGreenMask ?: Mat.zeros(targetMask.size(), CvType.CV_8U)
