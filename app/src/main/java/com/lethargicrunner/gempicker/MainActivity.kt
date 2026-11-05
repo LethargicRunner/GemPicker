@@ -1,9 +1,7 @@
 package com.lethargicrunner.gempicker
 
 import android.app.Activity
-import android.app.PendingIntent
 import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
@@ -11,7 +9,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.widget.Button
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
@@ -84,6 +81,6 @@ class MainActivity : AppCompatActivity() {
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED
         else
             PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-        packageManager.setComponentEnabledSetting(alias, state, PackageManager.DONTKILL_APP)
+        packageManager.setComponentEnabledSetting(alias, state, PackageManager.DONT_KILL_APP)
     }
 }
