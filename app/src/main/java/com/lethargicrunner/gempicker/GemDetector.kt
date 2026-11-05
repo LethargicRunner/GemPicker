@@ -3,6 +3,7 @@ package com.lethargicrunner.gempicker
 import android.graphics.Bitmap
 import android.media.Image
 import android.os.SystemClock
+import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
@@ -19,6 +20,16 @@ import kotlin.math.hypot
  * - tous les seuils sont RELATIFS à la largeur d'écran (indépendant de la résolution)
  */
 class GemDetector(private val screenW: Int, private val screenH: Int) {
+
+    init {
+        // L'AAR Maven OpenCV ne charge PAS la lib native automatiquement :
+        // sans initLocal(), première création de Mat → UnsatisfiedLinkError.
+        if (OpenCVLoader.initLocal()) {
+            GemLog.i("GemDetector", "OpenCV natif chargé (${Core.VERSION})")
+        } else {
+            GemLog.e("GemDetector", "ÉCHEC du chargement natif d'OpenCV")
+        }
+    }
 
     // ── ZONES INTERDITES AU TAP ──
     // ROI : HUD haut (faux diamant bleu) et barre du bas
@@ -79,7 +90,7 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             val circularity = 4 * Math.PI * area / (perim * perim)
             // Anneau fin : l'aire du contour est faible → filtre par RAYON
             // du cercle englobant, pas par aire de contour.
-            // Signature : minEnclosingCurve(points, center: Point, radius: float[])
+            // Signature : minEnclosingCircle(points, center: Point, radius: float[])
             val encCenter = Point()
             val encRadius = floatArrayOf(0f)
             Imgproc.minEnclosingCircle(MatOfPoint2f(*c.toArray()), encCenter, encRadius)
@@ -165,7 +176,9 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             Utils.matToBitmap(bgra, bmp)
             bgra.release(); zeros.release(); alpha.release()
             ScreenCaptureService.debugBitmap = bmp
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+            GemLog.e("GemDetector", "Erreur aperçu debug", e)
+        }
     }
 
     private fun Image.toBitmapCompat(): Bitmap? = try {
@@ -179,5 +192,8 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         )
         bmp.copyPixelsFromBuffer(buffer)
         Bitmap.createBitmap(bmp, 0, 0, width, height)
-    } catch (e: Exception) { null }
+    } catch (e: Exception) {
+        GemLog.e("GemDetector", "Conversion Image → Bitmap échouée", e)
+        null
+    }
 }
