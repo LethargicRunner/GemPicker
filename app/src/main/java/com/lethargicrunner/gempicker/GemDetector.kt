@@ -12,15 +12,18 @@ import kotlin.math.hypot
 /**
  * Deux mécaniques distinctes :
  *
- * 1. GEMME BLEUE : losange dans le cercle d'action vert → tap uniquement
+ * 1. GEMME BLEUE : losange dans le cercle d'action vert -> tap uniquement
  *    si la gemme ENTIÈRE est franchement dans le cercle (marge 20 %).
  *
- * 2. FORMES JAUNES / ROSE-MAUVE : autres parties du jeu, SANS cercle →
- *    tap direct où qu'elles apparaissent dans la zone de jeu
+ * 2. POISSONS JAUNES / ROSE-MAUVE : minijeu immobile, SANS cercle ->
+ *    tap direct où qu'ils apparaissent dans la zone de jeu
  *    (hors HUD haut et barre du bas, barrières absolues).
  *
- * CALIBRATION : histogramme des teintes saturées logué toutes les ~10 s
- * (ligne Diag) pour régler les gammes HSV sur les couleurs réelles du jeu.
+ * CALIBRATION (5 nov. 2026, capture réelle du minijeu) :
+ * - poisson rose #FF00AA -> H OpenCV ~160, fourchette 150-175
+ * - poissons jaunes/orange -> H OpenCV 20-40
+ * - losange bleu-cyan #00F0FF en haut à droite = HUD, ne JAMAIS le taper
+ *   (couvert par la barrière absolue des 12 % supérieurs)
  */
 class GemDetector(private val screenW: Int, private val screenH: Int) {
 
@@ -42,26 +45,30 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
     private val ABSOLUTE_NO_TAP_BOTTOM_FRACTION = 0.88f
     private val ABSOLUTE_NO_TAP_TOP_FRACTION    = 0.12f
 
-    // ── Gammes HSV (à calibrer via l'histogramme du journal) ──
+    // ── Gammes HSV calibrées sur capture réelle (5 nov. 2026) ──
     private val blueLow  = Scalar(85.0, 90.0, 100.0)
     private val blueHigh = Scalar(115.0, 255.0, 255.0)
     private val greenLow  = Scalar(40.0, 60.0, 80.0)
     private val greenHigh = Scalar(85.0, 255.0, 255.0)
-    private val yellowLow  = Scalar(18.0, 80.0, 80.0)
-    private val yellowHigh = Scalar(38.0, 255.0, 255.0)
-    private val pinkLow  = Scalar(130.0, 60.0, 80.0)
+    // Poissons jaunes/or : H 20-40, bien saturés
+    private val yellowLow  = Scalar(20.0, 100.0, 120.0)
+    private val yellowHigh = Scalar(40.0, 255.0, 255.0)
+    // Poisson rose #FF00AA : H ~160
+    private val pinkLow  = Scalar(150.0, 100.0, 120.0)
     private val pinkHigh = Scalar(175.0, 255.0, 255.0)
 
     // Tailles attendues (relatives à la largeur analysée)
     private val minGemArea = 0.5 * (0.04 * aw) * (0.04 * aw)
     private val maxGemArea = 0.5 * (0.10 * aw) * (0.10 * aw)
+    // Poissons ~10 % de largeur -> fourchette large
     private val minShapeArea = 0.5 * (0.03 * aw) * (0.03 * aw)
     private val maxShapeArea = 0.5 * (0.18 * aw) * (0.18 * aw)
 
     private val circleMinRadius = 0.12 * aw
     private val inclusionMargin = 0.80f
     private var lastTapAt = 0L
-    private val cooldownMs = 800L
+    // Minijeu poissons : clic le plus rapide possible
+    private val cooldownMs = 250L
     private var frameCount = 0
 
     data class Circle(val cx: Double, val cy: Double, val radius: Double, val area: Double)
@@ -143,7 +150,7 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
                 val area = Imgproc.contourArea(c)
                 if (area > bestHitArea) bestHitArea = area
                 if (area < minArea || area > maxArea) continue
-                // La gemme exige un cercle ; jaune/rose : tap direct
+                // La gemme exige un cercle ; poissons : tap direct
                 if (requiresCircle && circle == null) continue
 
                 val moments = Imgproc.moments(c)
