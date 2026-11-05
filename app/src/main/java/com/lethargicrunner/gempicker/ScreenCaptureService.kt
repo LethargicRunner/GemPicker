@@ -17,25 +17,26 @@ import androidx.core.app.ServiceCompat
 
 class ScreenCaptureService : Service() {
 
-    // Imbriquée directement dans la classe (PAS dans le companion) :
-    // ainsi ScreenCaptureService.Detection est résolvable depuis GemDetector.
     data class Detection(val x: Float, val y: Float, val confidence: Double, val ts: Long)
 
     companion object {
         const val TAG = "GemPicker"
         const val ACTION_STOP = "com.lethargicrunner.gempicker.STOP"
-        const val ANALYSIS_INTERVAL_MS = 100L   // ~10 fps
+        const val ANALYSIS_INTERVAL_MS = 100L
         const val NOTIFICATION_ID = 1
 
         @Volatile var lastDetection: Detection? = null
         @Volatile var running = false
 
-        // Mode debug : aperçu des masques (appui long sur la bulle)
         @Volatile var debugEnabled = false
         @Volatile var debugBitmap: Bitmap? = null
 
-        /** Dernier message d'erreur, pour affichage dans la bulle. */
         @Volatile var lastError: String? = null
+
+        // ── Cibles sélectionnables (options du jeu) ──
+        @Volatile var targetBlue = true    // gemme bleue
+        @Volatile var targetYellow = false // formes jaunes
+        @Volatile var targetPink = false   // formes rose-mauve
     }
 
     private var projection: MediaProjection? = null
@@ -44,8 +45,6 @@ class ScreenCaptureService : Service() {
     private var handlerThread: HandlerThread? = null
     private var detector: GemDetector? = null
 
-    // Android 14+ : le callback DOIT être enregistré AVANT createVirtualDisplay,
-    // sinon IllegalStateException → crash au tick sur la bulle.
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
             GemLog.w(TAG, "Projection arrêtée par le système")
@@ -61,8 +60,6 @@ class ScreenCaptureService : Service() {
 
         try {
             val notification = buildNotification()
-            // Android 14+ (API 34) : startForeground DOIT préciser le type,
-            // sinon crash MissingForegroundServiceTypeException.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceCompat.startForeground(
                     this, NOTIFICATION_ID, notification,
@@ -95,8 +92,6 @@ class ScreenCaptureService : Service() {
         val height = metrics.heightPixels
 
         imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-
-        // Android 14+ : enregistrer le callback AVANT createVirtualDisplay
         projection?.registerCallback(projectionCallback, Handler(Looper.getMainLooper()))
 
         virtualDisplay = projection?.createVirtualDisplay(
@@ -109,37 +104,30 @@ class ScreenCaptureService : Service() {
         detector = GemDetector(width, height)
         handlerThread = HandlerThread("analyzer").apply { start() }
         val handler = Handler(handlerThread!!.looper)
-        var lastAnalysis = 0L
-        var loggedFrames = 0
 
         handler.post(object : Runnable {
             override fun run() {
                 if (!running) return
-                val now = SystemClock.uptimeMillis()
                 val image = imageReader?.acquireLatestImage()
-                if (image != null && now - lastAnalysis >= ANALYSIS_INTERVAL_MS) {
-                    lastAnalysis = now
+                if (image != null) {
                     try {
                         val detection = detector?.detect(image)
                         lastDetection = detection
-                        // Log léger : 1 ligne toutes les ~10 s d'analyse
-                        if (loggedFrames++ % 100 == 0) {
-                            GemLog.i(TAG, "Analyse en cours (frame #$loggedFrames, " +
-                                "détection=${detection != null}, cercle vu=${ScreenCaptureService.debugBitmap != null})")
-                        }
                         if (detection != null) {
                             AutoTapAccessibilityService.requestTap(detection.x, detection.y)
                         }
                     } catch (e: Exception) {
                         GemLog.e(TAG, "Erreur d'analyse de frame", e)
                     } finally { image.close() }
-                } else image?.close()
+                } else {
+                    handler.postDelayed(this, ANALYSIS_INTERVAL_MS / 2)
+                    return
+                }
                 handler.postDelayed(this, ANALYSIS_INTERVAL_MS / 2)
             }
         })
     }
 
-    /** Signale l'erreur visiblement (toast + journal) au lieu de crasher en silence. */
     private fun fail(message: String, e: Exception? = null) {
         lastError = message
         if (e != null) GemLog.e(TAG, "Échec : $message", e) else GemLog.e(TAG, "Échec : $message")

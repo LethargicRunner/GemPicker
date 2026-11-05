@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -29,7 +30,6 @@ class MainActivity : AppCompatActivity() {
         MediaProjectionHolder.register(applicationContext)
         buildUi()
 
-        // --- Permissions (1er lancement) ---
         if (!Settings.canDrawOverlays(this)) {
             status("1/3 — Superposition : à autoriser")
             Toast.makeText(this, "1/3 : autorisez GemPicker à s'afficher par-dessus les apps", Toast.LENGTH_LONG).show()
@@ -49,7 +49,6 @@ class MainActivity : AppCompatActivity() {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 7)
         }
 
-        // Tout est prêt : bulle + demande de capture.
         status(if (MediaProjectionHolder.hasSession())
             "Session déjà validée — lancez le jeu et tapez la bulle"
         else "3/3 — Capture d'écran : validez la popup")
@@ -58,7 +57,6 @@ class MainActivity : AppCompatActivity() {
         if (!MediaProjectionHolder.hasSession()) requestProjectionThenPlay()
     }
 
-    /** Petite UI : état + boutons journal (affichage / partage / effacement). */
     private fun buildUi() {
         val pad = (16 * resources.displayMetrics.density).toInt()
         val root = LinearLayout(this).apply {
@@ -67,6 +65,25 @@ class MainActivity : AppCompatActivity() {
         }
         statusText = TextView(this).apply { text = "GemPicker — démarrage..." }
         root.addView(statusText)
+
+        // ── Cibles sélectionnables ──
+        root.addView(TextView(this).apply { text = "Formes à cliquer :" })
+        root.addView(CheckBox(this).apply {
+            text = "Gemme bleue"
+            isChecked = ScreenCaptureService.targetBlue
+            setOnCheckedChangeListener { _, c -> ScreenCaptureService.targetBlue = c }
+        })
+        root.addView(CheckBox(this).apply {
+            text = "Formes jaunes"
+            isChecked = ScreenCaptureService.targetYellow
+            setOnCheckedChangeListener { _, c -> ScreenCaptureService.targetYellow = c }
+        })
+        root.addView(CheckBox(this).apply {
+            text = "Formes rose-mauve"
+            isChecked = ScreenCaptureService.targetPink
+            setOnCheckedChangeListener { _, c -> ScreenCaptureService.targetPink = c }
+        })
+
         root.addView(Button(this).apply {
             text = "Afficher le journal"
             setOnClickListener { showLogInApp() }
@@ -91,7 +108,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun status(s: String) { statusText.text = s }
 
-    /** Affiche le journal directement dans l'app, dans une boîte de dialogue. */
     private fun showLogInApp() {
         val log = GemLog.read()
         val view = ScrollView(this).apply {
@@ -134,8 +150,8 @@ class MainActivity : AppCompatActivity() {
                 moveTaskToBack(true)
             } else {
                 GemLog.w("Main", "Popup de capture REFUSÉE (result=$resultCode)")
-                status("Capture refusée — GemPicker ne peut pas voir la gemme. Rouvrez l'app pour réessayer.")
-                Toast.makeText(this, "Sans la capture, impossible de voir la gemme. Réessayez.", Toast.LENGTH_LONG).show()
+                status("Capture refusée — rouvrez l'app pour réessayer.")
+                Toast.makeText(this, "Sans la capture, impossible de voir les formes. Réessayez.", Toast.LENGTH_LONG).show()
             }
         }
     }

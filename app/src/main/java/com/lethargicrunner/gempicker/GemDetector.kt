@@ -10,16 +10,13 @@ import org.opencv.imgproc.Imgproc
 import kotlin.math.hypot
 
 /**
- * Détection : gemme bleue (losange) + cercle d'action vert.
- * Tap UNIQUEMENT si la gemme entière est franchement dans le cercle
- * (marge 20 %) — pour ne jamais déclencher la popup d'erreur du jeu.
+ * Détection : formes cibles (gemme bleue, jaune, rose-mauve au choix)
+ * + cercle d'action vert. Tap UNIQUEMENT si la forme entière est
+ * franchement dans le cercle (marge 20 %).
  *
- * PERFORMANCE : analyse à résolution réduite (ANALYSIS_SCALE) : ÷2 →
- * 4× moins de RAM/CPU. Seuils relatifs à la largeur analysée.
- *
- * DIAGNOSTIC : toutes les 100 frames (~10 s), log détaillé des
- * observations (contours verts/bleus, rayons, aires) pour calibrer
- * les seuils HSV à distance via le journal.
+ * CALIBRATION : l'histogramme des teintes saturées de l'écran est logué
+ * toutes les ~10 s (ligne Diag) — il révèle les teintes HSV RÉELLES du jeu,
+ * qui servent ensuite à régler les gammes ci-dessous.
  */
 class GemDetector(private val screenW: Int, private val screenH: Int) {
 
@@ -38,15 +35,19 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
     private val aw = (screenW * ANALYSIS_SCALE).toInt()
     private val ah = (screenH * ANALYSIS_SCALE).toInt()
 
-    // ── ZONES INTERDITES AU TAP ──
     private val ABSOLUTE_NO_TAP_BOTTOM_FRACTION = 0.88f
     private val ABSOLUTE_NO_TAP_TOP_FRACTION    = 0.12f
 
-    // Teintes à calibrer
+    // ── Gammes HSV à calibrer via l'histogramme du journal ──
+    // (H OpenCV ∈ [0,180] ; 180° = 2 × teinte en degrés)
     private val blueLow  = Scalar(85.0, 90.0, 100.0)
     private val blueHigh = Scalar(115.0, 255.0, 255.0)
     private val greenLow  = Scalar(40.0, 60.0, 80.0)
     private val greenHigh = Scalar(85.0, 255.0, 255.0)
+    private val yellowLow  = Scalar(18.0, 80.0, 80.0)
+    private val yellowHigh = Scalar(38.0, 255.0, 255.0)
+    private val pinkLow  = Scalar(130.0, 60.0, 80.0)
+    private val pinkHigh = Scalar(175.0, 255.0, 255.0)
 
     private val minGemArea = 0.5 * (0.04 * aw) * (0.04 * aw)
     private val maxGemArea = 0.5 * (0.10 * aw) * (0.10 * aw)
@@ -83,8 +84,6 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         Imgproc.findContours(greenMask, greenContours, Mat(), Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
 
         var circle: Circle? = null
-        var bestCircleRadius = 0.0
-        var bestCircleCircularity = 0.0
         for (c in greenContours) {
             val area = Imgproc.contourArea(c)
             val perim = Imgproc.arcLength(MatOfPoint2f(*c.toArray()), true)
@@ -93,15 +92,11 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             val encCenter = Point()
             val encRadius = floatArrayOf(0f)
             Imgproc.minEnclosingCircle(MatOfPoint2f(*c.toArray()), encCenter, encRadius)
-            if (encRadius[0] > bestCircleRadius) {
-                bestCircleRadius = encRadius[0].toDouble()
-                bestCircleCircularity = circularity
-            }
             if (encRadius[0] > circleMinRadius && circularity > 0.6) {
                 val m = Imgproc.moments(c)
                 if (m.m00 == 0.0) continue
                 val cx = m.m10 / m.m00
-                val cy = m.m01 / m.m00
+                val cy = m.m01 / m00
                 var radius = 0.0
                 for (p in c.toArray()) {
                     val d = hypot((p.x - cx), (p.y - cy))
@@ -110,34 +105,37 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
                 if (circle == null || area > circle.area) circle = Circle(cx, cy, radius, area)
             }
         }
-        if (circle == null) {
-            greenMask.release(); mat.release()
-            maybeLogDiagnostics(greenCount = greenContours.size, blueCount = -1,
-                bestBlueArea = -1.0, circle = null)
-            return null
+
+        // ── 2. Masques CIBLES (bleu / jaune / rose selon options) ──
+        val targetMask = Mat.zeros(mat.size(), CvType.CV_8U)
+        if (ScreenCaptureService.targetBlue) addRange(mat, targetMask, blueLow, blueHigh)
+        if (ScreenCaptureService.targetYellow) addRange(mat, targetMask, yellowLow, yellowHigh)
+        if (ScreenCaptureService.targetPink) addRange(mat, targetMask, pinkLow, pinkHigh)
+        if (ScreenCaptureService.targetBlue || ScreenCaptureService.targetYellow || ScreenCaptureService.targetPink) {
+            val m2 = Mat()
+            Core.inRange(mat, blueLow, blueHigh, m2)
+            Core.bitwise_or(targetMask, m2, targetMask)
+            m2.release()
         }
-
-        // ── 2. Masque BLEU → gemme ──
-        val blueMask = Mat()
-        Core.inRange(mat, blueLow, blueHigh, blueMask)
         mat.release()
-        Imgproc.erode(blueMask, blueMask, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0)))
-        Imgproc.dilate(blueMask, blueMask, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0)))
+        Imgproc.erode(targetMask, targetMask, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0)))
+        Imgproc.dilate(targetMask, targetMask, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0)))
 
-        if (ScreenCaptureService.debugEnabled) buildDebugBitmap(blueMask, greenMask, roi)
+        if (ScreenCaptureService.debugEnabled) buildDebugBitmap(targetMask, greenMask, roi)
         greenMask.release()
 
         val contours = ArrayList<MatOfPoint>()
-        Imgproc.findContours(blueMask, contours, Mat(), Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
-        blueMask.release()
+        Imgproc.findContours(targetMask, contours, Mat(), Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
+        targetMask.release()
 
         var best: ScreenCaptureService.Detection? = null
         var bestScore = Double.NEGATIVE_INFINITY
-        var bestBlueArea = 0.0
+        var bestTargetArea = 0.0
         for (c in contours) {
             val area = Imgproc.contourArea(c)
-            if (area > bestBlueArea) bestBlueArea = area
+            if (area > bestTargetArea) bestTargetArea = area
             if (area < minGemArea || area > maxGemArea) continue
+            if (circle == null) continue
 
             val moments = Imgproc.moments(c)
             if (moments.m00 == 0.0) continue
@@ -169,8 +167,8 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             }
         }
 
-        maybeLogDiagnostics(greenCount = greenContours.size, blueCount = contours.size,
-            bestBlueArea = bestBlueArea, circle = circle)
+        maybeLogDiagnostics(greenCount = greenContours.size, targetCount = contours.size,
+            bestTargetArea = bestTargetArea, circle = circle, hsvMat = null)
 
         if (best == null) return null
         if (SystemClock.uptimeMillis() - lastTapAt < cooldownMs) return null
@@ -179,30 +177,74 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         return best
     }
 
+    private fun addRange(mat: Mat, target: Mat, low: Scalar, high: Scalar) {
+        val m = Mat()
+        Core.inRange(mat, low, high, m)
+        Core.bitwise_or(target, m, target)
+        m.release()
+    }
+
+    // Garde le dernier mat HSV pour l'histogramme du diagnostic
+    private var lastHsv: Mat? = null
+
     /**
-     * Toutes les 100 frames : observation chiffrée pour calibrer les seuils.
-     * cercle=null → pourquoi (aucun contour vert, ou rayon/circularité insuffisants).
+     * Toutes les ~10 s : observations chiffrées + HISTOGRAMME des teintes
+     * saturées (S>80, V>80) de l'écran. C'est la valeur de H dominante qui
+     * dit exactement quelle gamme HSV utiliser pour chaque forme du jeu.
      */
     private var lastDiagAt = 0L
-    private fun maybeLogDiagnostics(greenCount: Int, blueCount: Int, bestBlueArea: Double, circle: Circle?) {
+    private fun maybeLogDiagnostics(greenCount: Int, targetCount: Int,
+                                    bestTargetArea: Double, circle: Circle?, hsvMat: Mat?) {
         if (++frameCount % 100 != 0) return
         if (SystemClock.uptimeMillis() - lastDiagAt < 9000) return
         lastDiagAt = SystemClock.uptimeMillis()
+
         val c = if (circle != null)
             "cercle: r=${"%.0f".format(circle.radius)} (min $circleMinRadius) à (${"%.0f".format(circle.cx)}, ${"%.0f".format(circle.cy)})"
-        else
-            "cercle: AUCUN"
-        GemLog.i("Diag", "verts=$greenCount $c | bleus=$blueCount " +
-            "aireBleuMax=${"%.0f".format(bestBlueArea)} (attendu ${"%.0f".format(minGemArea)}-${"%.0f".format(maxGemArea)})")
+        else "cercle: AUCUN"
+        GemLog.i("Diag", "verts=$greenCount $c | cibles=$targetCount " +
+            "aireCibleMax=${"%.0f".format(bestTargetArea)} (attendu ${"%.0f".format(minGemArea)}-${"%.0f".format(maxGemArea)})")
+
+        // Histogramme des teintes saturées : 6 bins les plus peuplés
+        try {
+            val hsv = lastHsv ?: return
+            val channels = ArrayList<Mat>()
+            Core.split(hsv, channels)
+            val h = channels[0]; val s = channels[1]; val v = channels[2]
+            val satMask = Mat()
+            val sMask = Mat(); val vMask = Mat()
+            Core.inRange(s, Scalar(80.0), Scalar(255.0), sMask)
+            Core.inRange(v, Scalar(80.0), Scalar(255.0), vMask)
+            Core.bitwise_and(sMask, vMask, satMask)
+            val hist = Mat()
+            Imgproc.calcHist(listOf(h), Mat(), satMask, hist, MatOfInt(180), MatOfFloat(0f, 180f))
+            var total = 0.0
+            val bins = ArrayList<Pair<Int, Double>>()
+            for (i in 0 until 180) {
+                val n = hist.get(i, 0)[0]
+                total += n
+                bins.add(i to n)
+            }
+            hist.release()
+            val top = bins.sortedByDescending { it.second }.take(8)
+                .filter { it.second > total * 0.005 }
+                .joinToString(", ") { (hue, n) ->
+                    "H$hue=${"%.1f".format(100 * n / total)}%" }
+            GemLog.i("Diag", "Teintes saturées: $top")
+            sMask.release(); vMask.release(); satMask.release()
+            channels.forEach { it.release() }
+        } catch (e: Exception) {
+            GemLog.e("Diag", "Erreur histogramme", e)
+        }
     }
 
-    /** Masque composite BGRA : canal B = gemme, canal G = cercle, affiché par DebugOverlay */
-    private fun buildDebugBitmap(blueMask: Mat, greenMask: Mat, roi: Bitmap) {
+    /** Masque composite BGRA : canal B = cibles, canal G = cercle, affiché par DebugOverlay */
+    private fun buildDebugBitmap(targetMask: Mat, greenMask: Mat, roi: Bitmap) {
         try {
-            val zeros = Mat.zeros(blueMask.size(), CvType.CV_8U)
-            val alpha = Mat(blueMask.size(), CvType.CV_8U, Scalar.all(255.0))
+            val zeros = Mat.zeros(targetMask.size(), CvType.CV_8U)
+            val alpha = Mat(targetMask.size(), CvType.CV_8U, Scalar.all(255.0))
             val bgra = Mat()
-            Core.merge(ArrayList(listOf(blueMask, greenMask, zeros, alpha)), bgra)
+            Core.merge(ArrayList(listOf(targetMask, greenMask, zeros, alpha)), bgra)
             val bmp = Bitmap.createBitmap(roi.width, roi.height, Bitmap.Config.ARGB_8888)
             Utils.matToBitmap(bgra, bmp)
             bgra.release(); zeros.release(); alpha.release()
