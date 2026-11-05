@@ -1,6 +1,7 @@
 package com.lethargicrunner.gempicker
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
@@ -49,13 +50,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Tout est prêt : bulle + demande de capture.
-        status("3/3 — Capture d'écran : validez la popup")
+        status(if (MediaProjectionHolder.hasSession())
+            "Session déjà validée — lancez le jeu et tapez la bulle"
+        else "3/3 — Capture d'écran : validez la popup")
         bubble = FloatingBubble(applicationContext)
         bubble?.show()
-        requestProjectionThenPlay()
+        if (!MediaProjectionHolder.hasSession()) requestProjectionThenPlay()
     }
 
-    /** Petite UI : état + boutons journal (partage / effacement). */
+    /** Petite UI : état + boutons journal (affichage / partage / effacement). */
     private fun buildUi() {
         val pad = (16 * resources.displayMetrics.density).toInt()
         val root = LinearLayout(this).apply {
@@ -65,7 +68,11 @@ class MainActivity : AppCompatActivity() {
         statusText = TextView(this).apply { text = "GemPicker — démarrage..." }
         root.addView(statusText)
         root.addView(Button(this).apply {
-            text = "Envoyer le journal (copier vers moi)"
+            text = "Afficher le journal"
+            setOnClickListener { showLogInApp() }
+        })
+        root.addView(Button(this).apply {
+            text = "Envoyer le journal (partage)"
             setOnClickListener { shareLog() }
         })
         root.addView(Button(this).apply {
@@ -84,15 +91,30 @@ class MainActivity : AppCompatActivity() {
 
     private fun status(s: String) { statusText.text = s }
 
-    private fun shareLog() {
+    /** Affiche le journal directement dans l'app, dans une boîte de dialogue. */
+    private fun showLogInApp() {
         val log = GemLog.read()
+        val view = ScrollView(this).apply {
+            addView(TextView(this@MainActivity).apply {
+                text = if (log.isBlank()) "(journal vide — anomalie)" else log
+                setTextIsSelectable(true)
+                setPadding(24, 24, 24, 24)
+            })
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Journal GemPicker")
+            .setView(view)
+            .setPositiveButton("Fermer", null)
+            .show()
+    }
+
+    private fun shareLog() {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, log)
+            putExtra(Intent.EXTRA_TEXT, GemLog.read())
             putExtra(Intent.EXTRA_TITLE, "GemPicker — journal")
         }
         startActivity(Intent.createChooser(send, "Envoyer le journal"))
-        // (le journal complet reste aussi consultable dans l'app)
     }
 
     private fun requestProjectionThenPlay() {
