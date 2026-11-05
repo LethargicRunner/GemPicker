@@ -14,12 +14,20 @@ import kotlin.math.hypot
  * Tap UNIQUEMENT si la gemme entière est franchement dans le cercle
  * (marge 20 %) — pour ne jamais déclencher la popup d'erreur du jeu.
  *
+ * PERFORMANCE : la capture est réduite d'un facteur ANALYSIS_SCALE avant
+ * l'analyse OpenCV (÷2 → 4× moins de RAM et de CPU). Tous les seuils sont
+ * relatifs à la largeur, donc indépendants de la résolution analysée.
+ *
  * Calibration (4 nov. 2026, d'après 3 captures réelles du téléphone) :
  * - gemme : bleu clair cyan, losange ~1/20 de la largeur d'écran, liseré blanc fin
  * - cercle : anneau vert clair NON rempli, fin (2-3 px), diamètre ~1/3 de la largeur
- * - tous les seuils sont RELATIFS à la largeur d'écran (indépendant de la résolution)
  */
 class GemDetector(private val screenW: Int, private val screenH: Int) {
+
+    companion object {
+        /** Facteur de réduction pour l'analyse OpenCV. */
+        const val ANALYSIS_SCALE = 0.5f
+    }
 
     init {
         // L'AAR Maven OpenCV ne charge PAS la lib native automatiquement :
@@ -31,15 +39,18 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
         }
     }
 
-    // ── ZONES INTERDITES AU TAP ──
-    // ROI : HUD haut (faux diamant bleu) et barre du bas
-    // (BOUTIQUE, GAGNER, CARTE, ÉVÉNEMENTS, COMMUNAUTÉ) exclus.
-    private val roiLeft   = (screenW * 0.10f).toInt()
-    private val roiTop    = (screenH * 0.15f).toInt()
-    private val roiRight  = (screenW * 0.90f).toInt()
-    private val roiBottom = (screenH * 0.85f).toInt()
+    // Résolution d'analyse (réduite) et coordonnées écran correspondantes
+    private val aw = (screenW * ANALYSIS_SCALE).toInt()
+    private val ah = (screenH * ANALYSIS_SCALE).toInt()
 
-    // Barrières absolues indépendantes de la ROI
+    // ── ZONES INTERDITES AU TAP ──
+    // ROI : HUD haut (faux diamant bleu) et barre du bas exclus.
+    private val roiLeft   = (aw * 0.10f).toInt()
+    private val roiTop    = (ah * 0.15f).toInt()
+    private val roiRight  = (aw * 0.90f).toInt()
+    private val roiBottom = (ah * 0.85f).toInt()
+
+    // Barrières absolues indépendantes de la ROI (en fraction d'écran)
     private val ABSOLUTE_NO_TAP_BOTTOM_FRACTION = 0.88f
     private val ABSOLUTE_NO_TAP_TOP_FRACTION    = 0.12f
 
@@ -50,11 +61,11 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
     private val greenLow  = Scalar(40.0, 60.0, 80.0)
     private val greenHigh = Scalar(85.0, 255.0, 255.0)
 
-    // Seuils relatifs à la largeur d'écran (captures : gemme ≈ 1/20 largeur,
-    // cercle ≈ 1/3 largeur de diamètre, anneau fin)
-    private val minGemArea = 0.5 * (0.04 * screenW) * (0.04 * screenW)   // losange ≈ d²/2
-    private val maxGemArea = 0.5 * (0.10 * screenW) * (0.10 * screenW)
-    private val circleMinRadius = 0.12 * screenW
+    // Seuils relatifs à la largeur ANALYSÉE (les formules restent valables :
+    // gemme ≈ 1/20 largeur, cercle ≈ 1/3 largeur, anneau fin)
+    private val minGemArea = 0.5 * (0.04 * aw) * (0.04 * aw)   // losange ≈ d²/2
+    private val maxGemArea = 0.5 * (0.10 * aw) * (0.10 * aw)
+    private val circleMinRadius = 0.12 * aw
 
     private val inclusionMargin = 0.80f
     private var lastTapAt = 0L
@@ -63,8 +74,13 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
     data class Circle(val cx: Double, val cy: Double, val radius: Double, val area: Double)
 
     fun detect(image: Image): ScreenCaptureService.Detection? {
-        val bmp = image.toBitmapCompat() ?: return null
-        val roi = Bitmap.createBitmap(bmp, roiLeft, roiTop, roiRight - roiLeft, roiBottom - roiTop)
+        val full = image.toBitmapCompat() ?: return null
+
+        // Réduction de résolution pour l'analyse OpenCV (économie mémoire/CPU)
+        val roiFull = Bitmap.createBitmap(full, (screenW * 0.10f).toInt(), (screenH * 0.15f).toInt(),
+            (screenW * 0.80f).toInt(), (screenH * 0.70f).toInt())
+        val roi = Bitmap.createScaledBitmap(roiFull,
+            (roiFull.width * ANALYSIS_SCALE).toInt(), (roiFull.height * ANALYSIS_SCALE).toInt(), true)
 
         val mat = Mat(roi.height, roi.width, CvType.CV_8UC4)
         Utils.bitmapToMat(roi, mat)
@@ -88,9 +104,7 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             val perim = Imgproc.arcLength(MatOfPoint2f(*c.toArray()), true)
             if (perim <= 0.0) continue
             val circularity = 4 * Math.PI * area / (perim * perim)
-            // Anneau fin : l'aire du contour est faible → filtre par RAYON
-            // du cercle englobant, pas par aire de contour.
-            // Signature : minEnclosingCircle(points, center: Point, radius: float[])
+            // Anneau fin : filtre par RAYON du cercle englobant, pas par aire.
             val encCenter = Point()
             val encRadius = floatArrayOf(0f)
             Imgproc.minEnclosingCircle(MatOfPoint2f(*c.toArray()), encCenter, encRadius)
@@ -135,10 +149,10 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             val cx = (moments.m10 / moments.m00).toFloat()
             val cy = (moments.m01 / moments.m00).toFloat()
 
-            // Barrière absolue : jamais dans le HUD ni la barre du bas
-            val absY = cy + roiTop
-            if (absY < screenH * ABSOLUTE_NO_TAP_TOP_FRACTION ||
-                absY > screenH * ABSOLUTE_NO_TAP_BOTTOM_FRACTION) continue
+            // Barrière absolue : jamais dans le HUD ni la barre du bas (fractions écran)
+            val absY = cy / ah
+            if (absY < ABSOLUTE_NO_TAP_TOP_FRACTION ||
+                absY > ABSOLUTE_NO_TAP_BOTTOM_FRACTION) continue
 
             // Inclusion stricte : la gemme ENTIÈRE dans le cercle réduit de 20 %
             var maxDist = 0.0
@@ -152,8 +166,12 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             val score = area * 1000 - dist
             if (score > bestScore) {
                 bestScore = score
+                // Retour aux coordonnées ÉCRAN (pour le tap accessibility)
+                val roiLeftScreen = (screenW * 0.10f)
+                val roiTopScreen = (screenH * 0.15f)
                 best = ScreenCaptureService.Detection(
-                    cx + roiLeft, cy + roiTop,
+                    (cx / ANALYSIS_SCALE) + roiLeftScreen,
+                    (cy / ANALYSIS_SCALE) + roiTopScreen,
                     area / maxGemArea, System.currentTimeMillis()
                 )
             }
