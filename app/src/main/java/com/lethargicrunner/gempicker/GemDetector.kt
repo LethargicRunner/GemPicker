@@ -239,8 +239,8 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             Core.inRange(v, Scalar(80.0), Scalar(255.0), vMask)
             Core.bitwise_and(sMask, vMask, satMask)
             val hist = Mat()
-            // Signature : calcHist(images, mask, hist, histSize, ranges)
-            Imgproc.calcHist(listOf(h), satMask, hist, MatOfInt(180), MatOfFloat(0f, 180f))
+            // Signature : calcHist(images, channels, mask, hist, histSize, ranges)
+            Imgproc.calcHist(listOf(h), MatOfInt(0), satMask, hist, MatOfInt(180), MatOfFloat(0f, 180f))
             var total = 0.0
             val bins = ArrayList<Pair<Int, Double>>()
             for (i in 0 until 180) {
