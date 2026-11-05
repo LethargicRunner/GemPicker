@@ -48,7 +48,7 @@ class ScreenCaptureService : Service() {
     // sinon IllegalStateException → crash au tick sur la bulle.
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
-            Log.w(TAG, "Projection arrêtée par le système")
+            GemLog.w(TAG, "Projection arrêtée par le système")
             running = false
             stopSelf()
         }
@@ -80,9 +80,10 @@ class ScreenCaptureService : Service() {
             }
             projection = mgr.getMediaProjection(MediaProjectionHolder.resultCode, data)
             startCapture()
+            GemLog.i(TAG, "Service de capture démarré")
         } catch (e: Exception) {
             Log.e(TAG, "Démarrage du service échoué", e)
-            fail("Erreur : " + (e.message ?: e.javaClass.simpleName))
+            fail("Erreur : " + (e.message ?: e.javaClass.simpleName), e)
             return START_NOT_STICKY
         }
         return START_STICKY
@@ -103,11 +104,13 @@ class ScreenCaptureService : Service() {
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             imageReader!!.surface, null, null
         )
+        GemLog.i(TAG, "Écran virtuel ${width}x$height créé")
 
         detector = GemDetector(width, height)
         handlerThread = HandlerThread("analyzer").apply { start() }
         val handler = Handler(handlerThread!!.looper)
         var lastAnalysis = 0L
+        var loggedFrames = 0
 
         handler.post(object : Runnable {
             override fun run() {
@@ -119,11 +122,16 @@ class ScreenCaptureService : Service() {
                     try {
                         val detection = detector?.detect(image)
                         lastDetection = detection
+                        // Log léger : 1 ligne toutes les ~10 s d'analyse
+                        if (loggedFrames++ % 100 == 0) {
+                            GemLog.i(TAG, "Analyse en cours (frame #$loggedFrames, " +
+                                "détection=${detection != null}, cercle vu=${ScreenCaptureService.debugBitmap != null})")
+                        }
                         if (detection != null) {
                             AutoTapAccessibilityService.requestTap(detection.x, detection.y)
                         }
                     } catch (e: Exception) {
-                        Log.e(TAG, "Erreur d'analyse de frame", e)
+                        GemLog.e(TAG, "Erreur d'analyse de frame", e)
                     } finally { image.close() }
                 } else image?.close()
                 handler.postDelayed(this, ANALYSIS_INTERVAL_MS / 2)
@@ -131,9 +139,10 @@ class ScreenCaptureService : Service() {
         })
     }
 
-    /** Signale l'erreur visiblement (toast) au lieu de crasher en silence. */
-    private fun fail(message: String) {
+    /** Signale l'erreur visiblement (toast + journal) au lieu de crasher en silence. */
+    private fun fail(message: String, e: Exception? = null) {
         lastError = message
+        if (e != null) GemLog.e(TAG, "Échec : $message", e) else GemLog.e(TAG, "Échec : $message")
         running = false
         try {
             Handler(Looper.getMainLooper()).post {
@@ -156,6 +165,7 @@ class ScreenCaptureService : Service() {
     }
 
     override fun onDestroy() {
+        GemLog.i(TAG, "Service arrêté")
         running = false
         try { projection?.unregisterCallback(projectionCallback) } catch (_: Exception) {}
         debugBitmap?.recycle()
