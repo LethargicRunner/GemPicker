@@ -55,8 +55,6 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
     // Tailles attendues (relatives à la largeur analysée)
     private val minGemArea = 0.5 * (0.04 * aw) * (0.04 * aw)
     private val maxGemArea = 0.5 * (0.10 * aw) * (0.10 * aw)
-    // Formes jaunes/roses : taille inconnue → fourchette large, affinable
-    // via aireCibleMax du journal
     private val minShapeArea = 0.5 * (0.03 * aw) * (0.03 * aw)
     private val maxShapeArea = 0.5 * (0.18 * aw) * (0.18 * aw)
 
@@ -158,18 +156,20 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
                 if (absY < ABSOLUTE_NO_TAP_TOP_FRACTION ||
                     absY > ABSOLUTE_NO_TAP_BOTTOM_FRACTION) continue
 
+                val circ = circle
                 // Inclusion stricte dans le cercle (gemme uniquement)
                 if (requiresCircle) {
+                    if (circ == null) continue
                     var maxDist = 0.0
                     for (p in c.toArray()) {
-                        val d = hypot((p.x - circle!!.cx), (p.y - circle.cy))
+                        val d = hypot((p.x - circ.cx), (p.y - circ.cy))
                         if (d > maxDist) maxDist = d
                     }
-                    if (maxDist > circle.radius * inclusionMargin) continue
+                    if (maxDist > circ.radius * inclusionMargin) continue
                 }
 
-                val dist = if (circle != null && requiresCircle)
-                    hypot((cx - circle.cx), (cy - circle.cy)) else 0.0
+                val dist = if (requiresCircle && circ != null)
+                    hypot((cx - circ.cx), (cy - circ.cy)) else 0.0
                 val score = area * 1000 - dist
                 if (bestHit == null || score > bestHit!!.score) {
                     val roiLeftScreen = (screenW * 0.10f)
@@ -213,10 +213,8 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
      * saturées (S>80, V>80) — révèle les teintes HSV réelles du jeu.
      */
     private var lastDiagAt = 0L
-    private var lastRoi: Bitmap? = null
     private fun maybeLogDiagnostics(greenCount: Int, targetCount: Int,
                                     bestArea: Double, circle: Circle?, roi: Bitmap) {
-        lastRoi = roi
         if (++frameCount % 100 != 0) return
         if (SystemClock.uptimeMillis() - lastDiagAt < 9000) return
         lastDiagAt = SystemClock.uptimeMillis()
@@ -241,7 +239,8 @@ class GemDetector(private val screenW: Int, private val screenH: Int) {
             Core.inRange(v, Scalar(80.0), Scalar(255.0), vMask)
             Core.bitwise_and(sMask, vMask, satMask)
             val hist = Mat()
-            Imgproc.calcHist(listOf(h), Mat(), satMask, hist, MatOfInt(180), MatOfFloat(0f, 180f))
+            // Signature : calcHist(images, mask, hist, histSize, ranges)
+            Imgproc.calcHist(listOf(h), satMask, hist, MatOfInt(180), MatOfFloat(0f, 180f))
             var total = 0.0
             val bins = ArrayList<Pair<Int, Double>>()
             for (i in 0 until 180) {
