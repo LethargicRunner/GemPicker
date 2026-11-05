@@ -1,22 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
     <application
         android:label="GemPicker"
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.Material3.DayNight.NoActionBar">
 
-        <activity android:name=".MainActivity" android:exported="true">
+        <!-- L'icône du lanceur passe par un ALIAS : on peut la masquer
+             (setComponentEnabledSetting) sans désactiver l'activité elle-même. -->
+        <activity android:name=".MainActivity" android:exported="true"/>
+
+        <activity-alias
+            android:name=".IconAlias"
+            android:targetActivity=".MainActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-        </activity>
+        </activity-alias>
 
         <service android:name=".ScreenCaptureService"
             android:foregroundServiceType="mediaProjection"
@@ -32,5 +41,14 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/auto_tap_accessibility_config"/>
         </service>
+
+        <!-- Au démarrage du téléphone : notification « Réactiver la capture »
+             (le consentement MediaProjection doit être revalidé à chaque reboot,
+             Android ne permet pas de le faire sans activité visible). -->
+        <receiver android:name=".BootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
