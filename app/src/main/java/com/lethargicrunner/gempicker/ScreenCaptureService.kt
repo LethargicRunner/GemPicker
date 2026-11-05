@@ -16,13 +16,16 @@ import androidx.core.app.ServiceCompat
 
 class ScreenCaptureService : Service() {
 
+    // Imbriquée directement dans la classe (PAS dans le companion) :
+    // ainsi ScreenCaptureService.Detection est résolvable depuis GemDetector.
+    data class Detection(val x: Float, val y: Float, val confidence: Double, val ts: Long)
+
     companion object {
         const val TAG = "GemPicker"
         const val ACTION_STOP = "com.lethargicrunner.gempicker.STOP"
         const val ANALYSIS_INTERVAL_MS = 100L   // ~10 fps
         const val NOTIFICATION_ID = 1
 
-        data class Detection(val x: Float, val y: Float, val confidence: Double, val ts: Long)
         @Volatile var lastDetection: Detection? = null
         @Volatile var running = false
 
