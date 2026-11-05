@@ -1,7 +1,6 @@
 package com.lethargicrunner.gempicker
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
@@ -12,9 +11,9 @@ import android.widget.ImageView
 
 /**
  * Petit aperçu flottant (~140dp) des masques de détection :
- * pixels BLEUS = zone détectée comme gemme, VERTS = cercle d'action.
- * Sert à caler les bornes HSV en 2 minutes sur le vrai écran du jeu.
- * Activable par appui long sur la bulle.
+ * pixels BLEUS = cibles, VERTS = cercle d'action.
+ * FLAG_NOT_TOUCHABLE indispensable : sans lui, la fenêtre AVALE les taps
+ * du jeu dans sa zone (les poissons dessous ne sont jamais cliqués).
  */
 class DebugOverlay(private val context: Context) {
 
@@ -26,7 +25,7 @@ class DebugOverlay(private val context: Context) {
     private val updater = object : Runnable {
         override fun run() {
             if (imageView == null) return
-            val bmp: Bitmap? = ScreenCaptureService.debugBitmap
+            val bmp = ScreenCaptureService.debugBitmap
             if (bmp != null && !bmp.isRecycled) imageView?.setImageBitmap(bmp)
             handler.postDelayed(this, 500)
         }
@@ -40,7 +39,8 @@ class DebugOverlay(private val context: Context) {
         params = WindowManager.LayoutParams(
             dp(140), dp(220),
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.START; x = dp(8); y = dp(400) }
 
@@ -50,6 +50,7 @@ class DebugOverlay(private val context: Context) {
         }
         windowManager.addView(imageView, params)
         handler.post(updater)
+        GemLog.i("DebugOverlay", "Aperçu debug affiché (non tactile)")
     }
 
     fun hide() {

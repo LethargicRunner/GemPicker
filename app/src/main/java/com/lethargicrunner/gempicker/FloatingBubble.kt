@@ -17,6 +17,8 @@ import kotlin.math.abs
  * Bulle flottante draggable (56dp), toujours au-dessus du jeu.
  * Tap court = ON/OFF. Appui LONG (> 500 ms) = mode debug.
  * Glisser = déplacer. Anneau vert = actif.
+ * FLAG_NOT_TOUCHABLE sur l'aperçu debug ; la bulle, elle, DOIT rester
+ * tactile (c'est son unique raison d'être), mais elle ne couvre que 56dp.
  */
 class FloatingBubble(private val context: Context) {
 
@@ -121,7 +123,7 @@ class FloatingBubble(private val context: Context) {
         if (ScreenCaptureService.debugEnabled) {
             debugOverlay?.show()
             setOn(v, ScreenCaptureService.running)
-            Toast.makeText(context, "Debug ON : bleu = gemme, vert = cercle", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Debug ON : bleu = cibles, vert = cercle", Toast.LENGTH_SHORT).show()
         } else {
             debugOverlay?.hide()
             Toast.makeText(context, "Debug OFF", Toast.LENGTH_SHORT).show()
