@@ -1,9 +1,7 @@
 package com.lethargicrunner.gempicker
 
 import android.app.Activity
-import android.content.ComponentName
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
@@ -59,28 +57,14 @@ class MainActivity : AppCompatActivity() {
             if (resultCode == Activity.RESULT_OK && data != null) {
                 MediaProjectionHolder.resultCode = resultCode
                 MediaProjectionHolder.data = data
-                // Session validée : on masque l'icône de l'écran d'accueil.
-                setIconVisible(false)
                 Toast.makeText(this, "Prêt ! Lancez le jeu et tapez la bulle", Toast.LENGTH_LONG).show()
                 moveTaskToBack(true)
             } else {
-                // Refus : on garde l'icône visible pour pouvoir réessayer.
-                setIconVisible(true)
                 Toast.makeText(this,
-                    "Sans la capture, GemPicker ne peut pas voir la gemme. Réessayez via l'icône.",
+                    "Sans la capture, GemPicker ne peut pas voir la gemme. Rouvrez l'icône pour réessayer.",
                     Toast.LENGTH_LONG).show()
                 finish()
             }
         }
-    }
-
-    /** Masque/ré-affiche l'icône du lanceur (l'alias seulement, pas l'activité). */
-    private fun setIconVisible(visible: Boolean) {
-        val alias = ComponentName(this, "$packageName.IconAlias")
-        val state = if (visible)
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-        else
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-        packageManager.setComponentEnabledSetting(alias, state, PackageManager.DONT_KILL_APP)
     }
 }
