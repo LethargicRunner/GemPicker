@@ -12,6 +12,7 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.*
 import android.util.Log
+import android.widget.Toast
 import androidx.core.app.ServiceCompat
 
 class ScreenCaptureService : Service() {
@@ -32,6 +33,9 @@ class ScreenCaptureService : Service() {
         // Mode debug : aperçu des masques (appui long sur la bulle)
         @Volatile var debugEnabled = false
         @Volatile var debugBitmap: Bitmap? = null
+
+        /** Dernier message d'erreur, pour affichage dans la bulle. */
+        @Volatile var lastError: String? = null
     }
 
     private var projection: MediaProjection? = null
@@ -40,28 +44,47 @@ class ScreenCaptureService : Service() {
     private var handlerThread: HandlerThread? = null
     private var detector: GemDetector? = null
 
+    // Android 14+ : le callback DOIT être enregistré AVANT createVirtualDisplay,
+    // sinon IllegalStateException → crash au tick sur la bulle.
+    private val projectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() {
+            Log.w(TAG, "Projection arrêtée par le système")
+            running = false
+            stopSelf()
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) { stopSelf(); return START_NOT_STICKY }
 
-        val notification = buildNotification()
-        // Android 14+ (API 34) : startForeground DOIT préciser le type,
-        // sinon crash MissingForegroundServiceTypeException.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            ServiceCompat.startForeground(
-                this, NOTIFICATION_ID, notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        try {
+            val notification = buildNotification()
+            // Android 14+ (API 34) : startForeground DOIT préciser le type,
+            // sinon crash MissingForegroundServiceTypeException.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceCompat.startForeground(
+                    this, NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
 
-        val mgr = getSystemService(MediaProjectionManager::class.java)
-        val data = MediaProjectionHolder.data
-        if (data == null) { Log.w(TAG, "Pas de session de projection"); stopSelf(); return START_NOT_STICKY }
-        projection = mgr.getMediaProjection(MediaProjectionHolder.resultCode, data)
-        startCapture()
+            val mgr = getSystemService(MediaProjectionManager::class.java)
+            val data = MediaProjectionHolder.data
+            if (data == null) {
+                fail("Pas de session de capture — relancez l'app GemPicker")
+                return START_NOT_STICKY
+            }
+            projection = mgr.getMediaProjection(MediaProjectionHolder.resultCode, data)
+            startCapture()
+        } catch (e: Exception) {
+            Log.e(TAG, "Démarrage du service échoué", e)
+            fail("Erreur : " + (e.message ?: e.javaClass.simpleName))
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 
@@ -71,6 +94,10 @@ class ScreenCaptureService : Service() {
         val height = metrics.heightPixels
 
         imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+
+        // Android 14+ : enregistrer le callback AVANT createVirtualDisplay
+        projection?.registerCallback(projectionCallback, Handler(Looper.getMainLooper()))
+
         virtualDisplay = projection?.createVirtualDisplay(
             "gempicker_capture", width, height, metrics.densityDpi,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
@@ -95,11 +122,25 @@ class ScreenCaptureService : Service() {
                         if (detection != null) {
                             AutoTapAccessibilityService.requestTap(detection.x, detection.y)
                         }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Erreur d'analyse de frame", e)
                     } finally { image.close() }
                 } else image?.close()
                 handler.postDelayed(this, ANALYSIS_INTERVAL_MS / 2)
             }
         })
+    }
+
+    /** Signale l'erreur visiblement (toast) au lieu de crasher en silence. */
+    private fun fail(message: String) {
+        lastError = message
+        running = false
+        try {
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(applicationContext, message, Toast.LENGTH_LONG).show()
+            }
+        } catch (_: Exception) {}
+        stopSelf()
     }
 
     private fun buildNotification(): Notification {
@@ -116,6 +157,7 @@ class ScreenCaptureService : Service() {
 
     override fun onDestroy() {
         running = false
+        try { projection?.unregisterCallback(projectionCallback) } catch (_: Exception) {}
         debugBitmap?.recycle()
         debugBitmap = null
         virtualDisplay?.release()

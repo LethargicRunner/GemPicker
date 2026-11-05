@@ -17,10 +17,6 @@ import kotlin.math.abs
  * Bulle flottante draggable (56dp), toujours au-dessus du jeu.
  * Tap court = ON/OFF. Appui LONG (> 500 ms) = mode debug.
  * Glisser = déplacer. Anneau vert = actif.
- *
- * NB : le OnTouchListener consomme tous les événements → le système ne
- * peut PAS détecter le long-press tout seul ; on chronomètre DOWN/UP
- * manuellement.
  */
 class FloatingBubble(private val context: Context) {
 
@@ -91,10 +87,25 @@ class FloatingBubble(private val context: Context) {
             ScreenCaptureService.running = false
             context.stopService(Intent(context, ScreenCaptureService::class.java))
             setOn(v, false)
-        } else if (MediaProjectionHolder.hasSession()) {
-            ScreenCaptureService.running = true
-            context.startForegroundService(Intent(context, ScreenCaptureService::class.java))
-            setOn(v, true)
+        } else {
+            if (!MediaProjectionHolder.hasSession()) {
+                // Aucune session : la popup de consentement n'a jamais été validée.
+                Toast.makeText(context,
+                    "Pas de session de capture : relancez l'app GemPicker et validez la popup",
+                    Toast.LENGTH_LONG).show()
+                return
+            }
+            try {
+                ScreenCaptureService.running = true
+                context.startForegroundService(Intent(context, ScreenCaptureService::class.java))
+                setOn(v, true)
+            } catch (e: Exception) {
+                ScreenCaptureService.running = false
+                setOn(v, false)
+                Toast.makeText(context,
+                    "Démarrage impossible : " + (e.message ?: e.javaClass.simpleName),
+                    Toast.LENGTH_LONG).show()
+            }
         }
     }
 
