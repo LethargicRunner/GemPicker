@@ -36,9 +36,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
             return
         }
-        val enabled = Settings.Secure.getString(
-            contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        )?.contains("$packageName/.AutoTapAccessibilityService") == true
+        val enabled = accessibilityEnabled()
         if (!enabled) {
             status("2/3 — Accessibilité : à activer")
             Toast.makeText(this, "2/3 : activez le service d'accessibilité GemPicker", Toast.LENGTH_LONG).show()
@@ -52,10 +50,34 @@ class MainActivity : AppCompatActivity() {
         status(if (MediaProjectionHolder.hasSession())
             "Session déjà validée — lancez le jeu et tapez la bulle"
         else "3/3 — Capture d'écran : validez la popup")
-        bubble = FloatingBubble(applicationContext)
-        bubble?.show()
         if (!MediaProjectionHolder.hasSession()) requestProjectionThenPlay()
     }
+
+    /**
+     * La bulle est masquée quand la capture est arrêtée (tap sur la bulle).
+     * À chaque retour dans l'app (onResume), on la réaffiche si tout est
+     * autorisé : elle n'est donc présente à l'écran que pendant
+     * l'utilisation de GemPicker.
+     */
+    override fun onResume() {
+        super.onResume()
+        if (Settings.canDrawOverlays(this) && accessibilityEnabled()) {
+            if (bubble == null) bubble = FloatingBubble(applicationContext)
+            bubble?.show()
+            GemLog.i("Main", "Retour dans l'app — bulle réaffichée")
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // L'Activity est détruite mais la bulle peut rester si la capture
+        // tourne encore : c'est voulu (elle sert de ON/OFF pendant le jeu).
+    }
+
+    private fun accessibilityEnabled(): Boolean =
+        Settings.Secure.getString(
+            contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        )?.contains("$packageName/.AutoTapAccessibilityService") == true
 
     private fun buildUi() {
         val pad = (16 * resources.displayMetrics.density).toInt()

@@ -19,6 +19,8 @@ import kotlin.math.abs
  * Glisser = déplacer. Anneau vert = actif.
  * FLAG_NOT_TOUCHABLE sur l'aperçu debug ; la bulle, elle, DOIT rester
  * tactile (c'est son unique raison d'être), mais elle ne couvre que 56dp.
+ * La bulle est masquée dès l'arrêt de la capture : elle n'apparaît que
+ * quand l'app est utilisée (rouvrir GemPicker la fait réapparaître).
  */
 class FloatingBubble(private val context: Context) {
 
@@ -91,6 +93,17 @@ class FloatingBubble(private val context: Context) {
             ScreenCaptureService.running = false
             context.stopService(Intent(context, ScreenCaptureService::class.java))
             setOn(v, false)
+            // Masquer aussi le mode debug s'il était actif, puis retirer la bulle :
+            // elle ne doit rester à l'écran que pendant l'utilisation de l'app.
+            if (ScreenCaptureService.debugEnabled) {
+                ScreenCaptureService.debugEnabled = false
+                debugOverlay?.hide()
+            }
+            GemLog.i("Bubble", "Capture arrêtée — bulle masquée (rouvrez l'app pour relancer)")
+            Toast.makeText(context,
+                "Bulle masquée — rouvrez GemPicker pour relancer",
+                Toast.LENGTH_LONG).show()
+            hide()
         } else {
             if (!MediaProjectionHolder.hasSession()) {
                 GemLog.w("Bubble", "Tap sans session de capture (popup non validée)")
@@ -118,7 +131,7 @@ class FloatingBubble(private val context: Context) {
     private fun toggleDebug() {
         val v = bubble ?: return
         ScreenCaptureService.debugEnabled = !ScreenCaptureService.debugEnabled
-        GemLog.i("Bubble", "Appui long : debug = ${ScreenCaptureService.debugEnabled}")
+        GemLog.i("Bubble", "Appui long : debug = " + ScreenCaptureService.debugEnabled)
         if (debugOverlay == null) debugOverlay = DebugOverlay(context)
         if (ScreenCaptureService.debugEnabled) {
             debugOverlay?.show()
